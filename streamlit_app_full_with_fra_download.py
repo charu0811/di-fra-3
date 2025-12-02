@@ -262,16 +262,61 @@ with tabs[1]:
 with tabs[2]:
     st.header("Cointegration & Pair tests")
     if sel=="All":
-        cols = list(wide.columns); c1 = st.selectbox("Series 1", cols, index=0); c2 = st.selectbox("Series 2", cols, index=1)
-        s1 = wide[c1].dropna(); s2 = wide[c2].dropna()
-        tmp = pd.concat([s1,s2], axis=1).dropna()
-        st.dataframe(tmp.head())
-        if st.button("Run EG test"):
-            res = engle_granger(tmp.iloc[:,0], tmp.iloc[:,1])
-            st.write(res)
+        # --- Improved Series selector (replace existing selectbox code) ---
+        # `combined_wide` is expected to be the DataFrame with multi-instrument columns
+        cols = list(wide.columns)
+
+        # show counts and a simple filter input
+        st.markdown(f"**Available series:** {len(cols)}")
+        filter_txt = st.text_input("Filter series (substring, regex OK):", value="")
+        if filter_txt:
+            try:
+                filtered = [c for c in cols if (filter_txt.lower() in c.lower()) or (pd.Series([c]).str.contains(filter_txt, regex=True).any())]
+            except Exception:
+                filtered = [c for c in cols if filter_txt.lower() in c.lower()]
+        else:
+            filtered = cols
+
+        if not filtered:
+            st.warning("No series match the filter. Clear filter or upload data.")
+        else:
+            # present as a multiselect so user can pick 1 or 2+ series
+            st.write("Pick 1 or more series (multiselect) — you can type to search within the list.")
+            selected = st.multiselect("Select series", options=filtered, default=filtered[:2] if len(filtered)>=2 else filtered[:1], help="Type to search; use Ctrl/Cmd+A in the list to select all visible items")
+            if not selected:
+                st.info("Select at least one series to continue.")
+            else:
+                # if exactly 2 selected, show pairwise cointegration button
+                tmp = wide[selected].dropna()
+                st.subheader("Aligned preview (head)")
+                st.dataframe(tmp.head(10))
+                st.markdown(f"Aligned rows: **{len(tmp)}**")
+                if len(selected) >= 2:
+                    if st.button("Run cointegration tests (Engle-Granger) on selected pair(s)"):
+                        # run pair tests for every unique pair among selected (or the first two)
+                        pairs = []
+                        if len(selected) == 2:
+                            pairs = [(selected[0], selected[1])]
+                        else:
+                            # if >2 selected, test all pairwise combinations (can be many)
+                            from itertools import combinations
+                            pairs = list(combinations(selected, 2))
+                        results = {}
+                        for a,b in pairs:
+                            series_a = wide[a].dropna(); series_b = wide[b].dropna()
+                            aligned = pd.concat([series_a, series_b], axis=1).dropna()
+                            if len(aligned) < 20:
+                                results[f"{a} <> {b}"] = {"error":"not enough overlapping data (<20)"}
+                                continue
+                            # Use engle_granger function defined above
+                            eg = engle_granger(aligned.iloc[:,0], aligned.iloc[:,1])
+                            results[f"{a} <> {b}"] = eg
+                        st.subheader("Engle-Granger results (per pair)")
+                        st.json(results)
+                else:
+                    st.info("Select at least 2 series to run pairwise tests.")
     else:
         st.info("Switch to All to run pair tests")
-
 with tabs[3]:
     st.header("Volatility & ATR")
     if sel!="All":
