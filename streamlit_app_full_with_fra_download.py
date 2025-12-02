@@ -263,10 +263,7 @@ with tabs[2]:
     st.header("Cointegration & Pair tests")
     if sel=="All":
         # --- Improved Series selector (replace existing selectbox code) ---
-        # `combined_wide` is expected to be the DataFrame with multi-instrument columns
         cols = list(wide.columns)
-
-        # show counts and a simple filter input
         st.markdown(f"**Available series:** {len(cols)}")
         filter_txt = st.text_input("Filter series (substring, regex OK):", value="")
         if filter_txt:
@@ -280,27 +277,42 @@ with tabs[2]:
         if not filtered:
             st.warning("No series match the filter. Clear filter or upload data.")
         else:
-            # present as a multiselect so user can pick 1 or 2+ series
             st.write("Pick 1 or more series (multiselect) — you can type to search within the list.")
             selected = st.multiselect("Select series", options=filtered, default=filtered[:2] if len(filtered)>=2 else filtered[:1], help="Type to search; use Ctrl/Cmd+A in the list to select all visible items")
             if not selected:
                 st.info("Select at least one series to continue.")
             else:
-                # if exactly 2 selected, show pairwise cointegration button
                 tmp = wide[selected].dropna()
                 st.subheader("Aligned preview (head)")
                 st.dataframe(tmp.head(10))
                 st.markdown(f"Aligned rows: **{len(tmp)}**")
+
+                # --- Correlation heatmaps ---
+                st.subheader("Correlation heatmaps")
+                st.markdown("Choose correlation type and compute heatmaps for Levels, Returns, and First Differences.")
+                corr_method = st.selectbox("Correlation method", ["pearson","spearman"], index=0)
+                # prepare matrices: levels (aligned), returns, first differences
+                # ensure sufficient overlap
+                if len(tmp) < 2:
+                    st.warning("Not enough data to compute correlations (need ≥2 aligned rows).")
+                else:
+                    corr_levels = tmp.corr(method=corr_method)
+                    corr_returns = tmp.pct_change().corr(method=corr_method)
+                    corr_diff1 = tmp.diff().corr(method=corr_method)
+
+                    fig1 = px.imshow(corr_levels, text_auto=True, title="Correlation — Levels ("+corr_method+")")
+                    fig2 = px.imshow(corr_returns, text_auto=True, title="Correlation — Returns ("+corr_method+")")
+                    fig3 = px.imshow(corr_diff1, text_auto=True, title="Correlation — First Differences ("+corr_method+")")
+
+                    st.plotly_chart(fig1, use_container_width=True)
+                    st.plotly_chart(fig2, use_container_width=True)
+                    st.plotly_chart(fig3, use_container_width=True)
+
+                # --- Engle-Granger pair tests ---
                 if len(selected) >= 2:
                     if st.button("Run cointegration tests (Engle-Granger) on selected pair(s)"):
-                        # run pair tests for every unique pair among selected (or the first two)
-                        pairs = []
-                        if len(selected) == 2:
-                            pairs = [(selected[0], selected[1])]
-                        else:
-                            # if >2 selected, test all pairwise combinations (can be many)
-                            from itertools import combinations
-                            pairs = list(combinations(selected, 2))
+                        from itertools import combinations
+                        pairs = [(selected[0], selected[1])] if len(selected)==2 else list(combinations(selected,2))
                         results = {}
                         for a,b in pairs:
                             series_a = wide[a].dropna(); series_b = wide[b].dropna()
@@ -308,7 +320,6 @@ with tabs[2]:
                             if len(aligned) < 20:
                                 results[f"{a} <> {b}"] = {"error":"not enough overlapping data (<20)"}
                                 continue
-                            # Use engle_granger function defined above
                             eg = engle_granger(aligned.iloc[:,0], aligned.iloc[:,1])
                             results[f"{a} <> {b}"] = eg
                         st.subheader("Engle-Granger results (per pair)")
